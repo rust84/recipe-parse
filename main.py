@@ -43,6 +43,11 @@ def get_run_log_path(pdf_path):
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     return f"{base_name}_run_log.json"
 
+def get_output_file_path(pdf_path):
+    """Generate output file path based on PDF file name"""
+    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    return f"{base_name}_recipes.json"
+
 def load_run_log(log_path):
     """Load the run log to get the last processed page"""
     if os.path.exists(log_path):
@@ -62,6 +67,37 @@ def save_run_log(log_path, last_processed_page, completed=False):
     }
     with open(log_path, 'w') as f:
         json.dump(data, f, indent=2)
+
+def append_to_output_file(output_path, chunk_start, chunk_end, content):
+    """Append processed content to output file"""
+    # Parse content if it's a JSON string to remove escape characters
+    if isinstance(content, str):
+        try:
+            # Try to parse as JSON to remove escape characters
+            parsed_content = json.loads(content)
+            chunk_data = parsed_content
+        except json.JSONDecodeError:
+            # If not valid JSON, use as-is but clean up common escape characters
+            chunk_data = content.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"').replace('\\\\', '\\')
+    else:
+        chunk_data = content
+
+    # Load existing data or create new structure
+    if os.path.exists(output_path):
+        try:
+            with open(output_path, 'r') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            data = {"recipes": []}
+    else:
+        data = {"recipes": []}
+    
+    # Append new chunk data
+    data["recipes"].append(chunk_data)
+    
+    # Write back to file with ensure_ascii=False to prevent unicode escaping
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 def extract_pdf_pages(pdf_path, start_page, end_page):
     """Extract specific pages from PDF and save as temporary PDF"""
@@ -94,7 +130,7 @@ def create_file(file_path):
         )
         return result.id
 
-def process_pdf_chunk(chunk_path, chunk_start, chunk_end):
+def process_pdf_chunk(chunk_path, chunk_start, chunk_end, output_path):
     """Process a single PDF chunk"""
     try:
         file_id = create_file(chunk_path)
@@ -116,7 +152,10 @@ def process_pdf_chunk(chunk_path, chunk_start, chunk_end):
         )
 
         print(f"\n=== Pages {chunk_start}-{chunk_end} ===")
-        print(response.output_text)
+        print("Content saved to output file")
+        
+        # Save to output file
+        append_to_output_file(output_path, chunk_start, chunk_end, response.output_text)
         
         # Clean up the uploaded file
         client.files.delete(file_id)
@@ -131,6 +170,7 @@ def main():
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(description="Analyze a PDF using OpenAI's vision model in 2-page chunks")
     parser.add_argument("pdf_file", help="Path to the PDF file to analyze")
+    parser.add_argument("-o", "--output", help="Output file path (default: {pdf_name}_recipes.json)")
     
     args = parser.parse_args()
     
@@ -145,8 +185,10 @@ def main():
         sys.exit(1)
     
     try:
-        # Get run log path and load previous progress
+        # Get file paths
         log_path = get_run_log_path(args.pdf_file)
+        output_path = args.output or get_output_file_path(args.pdf_file)
+        
         last_processed_page, completed = load_run_log(log_path)
         
         if completed:
@@ -157,6 +199,7 @@ def main():
         # Get total page count
         total_pages = get_pdf_page_count(args.pdf_file)
         print(f"Total pages in PDF: {total_pages}")
+        print(f"Output will be saved to: {output_path}")
         
         if last_processed_page > 0:
             print(f"Resuming from page {last_processed_page + 1}")
@@ -177,7 +220,7 @@ def main():
             
             try:
                 # Process the chunk
-                success = process_pdf_chunk(temp_chunk_path, chunk_start, chunk_end)
+                success = process_pdf_chunk(temp_chunk_path, chunk_start, chunk_end, output_path)
                 
                 if success:
                     # Update progress
@@ -196,6 +239,7 @@ def main():
         if current_page > total_pages:
             save_run_log(log_path, total_pages, completed=True)
             print(f"\n✅ Successfully processed all {total_pages} pages!")
+            print(f"Results saved to: {output_path}")
             print(f"Run log saved to: {log_path}")
         
     except FileNotFoundError:

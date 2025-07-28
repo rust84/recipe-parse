@@ -162,3 +162,4 @@ cython_debug/
 
 .venv
 *_run_log.json
+*_recipes.json
