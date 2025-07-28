@@ -29,7 +29,7 @@ This tool processes PDF files containing recipe images and extracts structured r
 1. Clone the repository
 2. Install dependencies:
    ```bash
-   pip install openai pydantic python-dotenv PyMuPDF
+   pip install -r requirements.txt
    ```
 3. Create a `.env` file with your OpenAI API key:
    ```
